@@ -23,10 +23,8 @@ using ttn::OperandsAndConstraints;
 
 namespace {
 
-const std::string kWgmmaFenceOp = "wgmma.fence.sync.aligned;";
 const std::string kWgmmaCommitGroupOp = "wgmma.commit_group.sync.aligned;";
 const std::string kClusterWaitOp = "barrier.cluster.wait.aligned;";
-const std::string kFenceMbarrierInitOp = "fence.mbarrier_init.release.cluster;";
 const std::string kClusterCtaIdOp = "{\n"
                                     ".reg .u32 a<5>;              \n"
                                     "mov.u32 a0, %cluster_ctaid.x;\n"  // x
@@ -208,6 +206,19 @@ private:
   std::string ptxAsm;
   Constraints outputConstraints;
   Constraints inputConstraints;
+};
+
+class WGMMAFenceOpPattern : public OpRewritePattern<ttn::WGMMAFenceOp> {
+public:
+  using OpRewritePattern<ttn::WGMMAFenceOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(ttn::WGMMAFenceOp op,
+                                PatternRewriter &rewriter) const override {
+    auto loc = op.getLoc();
+    rewriter.create<NVVM::WgmmaFenceAlignedOp>(loc);
+    rewriter.eraseOp(op);
+    return success();
+  }
 };
 
 class FenceAsyncSharedOpPattern
@@ -779,12 +790,16 @@ public:
 #define POPULATE_NVGPU_OP(SRC_OP, ASM)                                         \
   patterns.add<NVGPUOpGenericPattern<SRC_OP>>(context, ASM, Constraints(),     \
                                               Constraints());
-    POPULATE_NVGPU_OP(ttn::WGMMAFenceOp, kWgmmaFenceOp)
+    // POPULATE_NVGPU_OP(ttn::WGMMAFenceOp, kWgmmaFenceOp)
     POPULATE_NVGPU_OP(ttn::WGMMACommitGroupOp, kWgmmaCommitGroupOp)
     POPULATE_NVGPU_OP(ttn::ClusterWaitOp, kClusterWaitOp)
 #undef POPULATE_NVGPU_OP
     patterns.add<NVGPUOpGenericPattern<ttn::ClusterCTAIdOp>>(
         context, kClusterCtaIdOp, Constraints({"=r"}), Constraints());
+    // patterns.add<WGMMAFenceOpPattern,
+    // WGMMACommitGroupOpPattern,ClusterWaitOpPattern,
+    // ClusterCTAIdOpPattern>(context);
+    patterns.add<WGMMAFenceOpPattern>(context);
 
     patterns
         .add<FenceAsyncSharedOpPattern, LoadMatrixOpPattern,
